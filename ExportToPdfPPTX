@@ -1,0 +1,70 @@
+param ( #input params from calling script
+     [string] $Client_Secret = "INPUT_REQUIRED_PARAMETER",
+     [string] $Client_Id = "INPUT_REQUIRED_PARAMETER",
+     [string] $Tenant_Id = "INPUT_REQUIRED_PARAMETER",
+     [string] $Workspace_Id = "INPUT_REQUIRED_PARAMETER",
+     [string] $ReportId ="INPUT_REQUIRED_PARAMETER",
+     [string] $Folder="INPUT_REQUIRED_PARAMETER", #ExampleFormat C:\Users\testuser\Desktop\PowerShell\
+     [string] $FileName="INPUT_REQUIRED_PARAMETER" #ExampleFormat testfile.pptx
+     )
+
+#----Assign all paramaters for usage-----#
+$SecPasswd = ConvertTo-SecureString $Client_Secret -AsPlainText -Force
+$AppId = $Client_Id
+$PSCred = New-Object PSCredential($AppId,$SecPasswd)
+$TenantId = $Tenant_Id 
+
+
+#----Connect to PowerBI Service Account----#
+Connect-PowerBIServiceAccount -Tenant $TenantId -ServicePrincipal -Credential $PSCred
+
+
+#----JSON body for the API to define format of file and identity ----#
+
+#----INPUT PARAMETRES ----#
+
+
+$jsonHashtable = '{
+    "format": "INPUT_PDF_OR_PPTX",
+    "powerBIReportConfiguration": {
+        "identities": [
+            {
+                "username": "INPUT_REQUIRED_PARAMETER", 
+                "roles": ["INPUT_REQUIRED_PARAMETER"],
+                "datasets": ["INPUT_REQUIRED_PARAMETER"]
+            }
+        ]
+    } 
+}'
+
+
+#----STEP1 API to generate export file ID ----#
+$output=Invoke-PowerBIRestMethod -Url "https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId/reports/$ReportId/ExportTo" -Body $jsonHashtable   -Method POST | ConvertFrom-Json
+$fileid=$output.id
+
+
+#----STEP2 API to generate export link (resourceLocation) based on the export ID provided ----#
+$step2Url="https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId/reports/$ReportId/Exports/$fileid"
+
+
+#----Repeating STEP2 untill it gets status Succeeded#
+$fileResponse = "";
+Do
+{
+Write-Output "Waiting for the Export to be available"
+$fileResponse=Invoke-PowerBIRestMethod -Url $step2Url -Method GET | ConvertFrom-Json
+$filestatus=$fileResponse.status
+$filestatus
+Start-Sleep -Seconds 5
+}
+While($filestatus -ne "Succeeded")
+
+
+
+#----Getting ResourceLocation---#
+$filelocation=$fileResponse.resourceLocation
+
+
+#----STEP3 API to export the generated file from ResourceLocation ----#
+Invoke-PowerBIRestMethod -Url $filelocation -Method Get -OutFile "$Folder\$FileName"
+
